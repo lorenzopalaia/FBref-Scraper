@@ -1,4 +1,3 @@
-from tkinter.font import names
 import pandas as pd
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -42,17 +41,20 @@ LEAGUES = {
     20: 'Bundesliga-Stats',
 }
 
-BASE_URL = 'https://fbref.com'
 
-def download_league_csv(league_id, league_name, season = ''):
+def get_cur_season():
+    cur_year = date.today().year
+    if date.today().month in range(8, 13):
+        return '{cur_year}-{next_year}'.format(cur_year = cur_year, next_year = cur_year + 1)
+    elif date.today().month in range(1, 9):
+        return '{prev_year}-{cur_year}'.format(prev_year = cur_year - 1, cur_year = cur_year)
+
+def download_league_csv(league_id, season = ''):
+    league_name = LEAGUES[league_id]
     cur_season = False
     if season == '':
         cur_season = True
-        cur_year = date.today().year
-        if date.today().month in range(8, 13):
-            season = '{cur_year}-{next_year}'.format(cur_year = cur_year, next_year = cur_year + 1)
-        elif date.today().month in range(1, 9):
-            season = '{prev_year}-{cur_year}'.format(prev_year = cur_year - 1, cur_year = cur_year)
+        season = get_cur_season()
     path = 'csv/leagues/{league_name}/{season}'.format(league_name = league_name, season = season)
     if not os.path.exists(path):
         os.makedirs(path)
@@ -71,18 +73,31 @@ def download_league_csv(league_id, league_name, season = ''):
     for id in LEAGUE_STATS_MAP.keys():
         dfs[id].to_csv('{path}/{stat_name}'.format(path = path, stat_name = LEAGUE_STATS_MAP[id]))
 
-
+'''
 def download_big5_season_csv(season = ''):
     for key in LEAGUES.keys():
-        download_league_csv(key, LEAGUES[key], season)
+        download_league_csv(key, season)
+'''
 
-
-#download_big5_season_csv()
-#download_big5_season_csv('2021-2022')
-
-
-def get_league_teams(league):
-    r = requests.get(league).text
+def get_league_teams(league_id, season = ''):
+    league_name = LEAGUES[league_id]
+    cur_season = False
+    if season == '':
+        cur_season = True
+        season = get_cur_season()
+    url = None
+    if cur_season:
+        url = 'https://fbref.com/en/comps/{league_id}/{league_name}'.format(
+            league_id = league_id,
+            league_name = league_name,
+        )
+    else:
+        url = 'https://fbref.com/en/comps/{league_id}/{season}/{season}-{league_name}'.format(
+            league_id = league_id,
+            league_name = league_name,
+            season = season
+        )
+    r = requests.get(url).text
     bs = BeautifulSoup(r, 'html.parser')
     table = bs.find('table', id=lambda x: x and x.startswith('result'))
     teams = []
@@ -93,22 +108,6 @@ def get_league_teams(league):
             urls.append(a['href'])
     df = pd.DataFrame()
     df['Team'] = teams
-    df['URL'] = urls
-    return df
-
-
-def get_team_players(team):
-    r = requests.get(team).text
-    bs = BeautifulSoup(r, 'html.parser')
-    table = bs.find('div', id='div_stats_standard_11')
-    names = []
-    urls = []
-    for a in table.findAll('a'):
-        if a.parent.name == 'th':
-            names.append(a.string)
-            urls.append(a['href'])
-    df = pd.DataFrame()
-    df['Name'] = names
     df['URL'] = urls
     return df
 
@@ -126,6 +125,51 @@ def get_player_stats(player):
     df = df.drop('Matches', axis=1)
     return df
 
+def download_league_players_stats(league_id, season = ''):
+    league_name = LEAGUES[league_id]
+    cur_season = False
+    if season == '':
+        cur_season = True
+        season = get_cur_season()
+    path = 'csv/leagues/{league_name}/{season}/all_players.csv'.format(league_name = league_name, season = season)
+    df = None
+    if cur_season:
+        df = get_league_teams(league_id, '')
+    else:
+        df = get_league_teams(league_id, season)
+    frames = []
+    for url in df['URL']:
+        frames.append(get_player_stats('{base}{url}'.format(base = 'https://fbref.com', url = url)))
+    df = pd.concat(frames)
+    df = df.reset_index()
+    df = df.drop('index', axis=1)
+    df.to_csv(path)
+
+
+download_league_csv(11, '')
+download_league_csv(11, '2021-2022')
+download_league_players_stats(11, '')
+download_league_players_stats(11, '2021-2022')
+
+
+'''
+#TEST AREA
+
+def get_team_players(team):
+    r = requests.get(team).text
+    bs = BeautifulSoup(r, 'html.parser')
+    table = bs.find('div', id='div_stats_standard_11')
+    names = []
+    urls = []
+    for a in table.findAll('a'):
+        if a.parent.name == 'th':
+            names.append(a.string)
+            urls.append(a['href'])
+    df = pd.DataFrame()
+    df['Name'] = names
+    df['URL'] = urls
+    return df
+
 def get_league_players_urls(league):
     df = get_league_teams(league)
     frames = []
@@ -134,19 +178,6 @@ def get_league_players_urls(league):
     df = pd.concat(frames)
     return df
 
-def get_league_players_stats(league):
-    df = get_league_teams(league)
-    frames = []
-    for url in df['URL']:
-        frames.append(get_player_stats('{base}{url}'.format(base = BASE_URL, url = url)))
-    df = pd.concat(frames)
-    df = df.reset_index()
-    df = df.drop('index', axis=1)
-    return df
-
-df = get_league_players_stats('https://fbref.com/en/comps/11/Serie-A-Stats')
-df.to_csv('csv/listone.csv')
-
-#get_league_players_urls('https://fbref.com/en/comps/11/Serie-A-Stats')
-#get_league_teams('https://fbref.com/en/comps/11/Serie-A-Stats')
 #get_team_players('https://fbref.com/en/squads/cf74a709/Roma-Stats')
+#get_league_players_urls('https://fbref.com/en/comps/11/Serie-A-Stats')
+'''
